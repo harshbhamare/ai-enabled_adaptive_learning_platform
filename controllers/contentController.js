@@ -111,18 +111,59 @@ const analyzeContent = async (req, res) => {
 
 const generateTopics = async (req, res) => {
 
+  console.log("REQ BODY:", req.body);
+
   const { easy, moderate, hard } = req.body;
 
   const content = await Content.findById(req.params.id);
 
   if (!content) {
+
     return res.status(404).json({
       message: 'Content not found'
     });
+
+  }
+
+  // Ownership check
+  if (content.uploadedBy.toString() !== req.user._id.toString()) {
+
+    return res.status(403).json({
+      message: 'Not authorized'
+    });
+
+  }
+
+  // Validation
+  if (
+    easy < 0 ||
+    moderate < 0 ||
+    hard < 0
+  ) {
+
+    return res.status(400).json({
+      message: 'Invalid topic counts'
+    });
+
+  }
+
+  const totalTopics = easy + moderate + hard;
+
+  if (totalTopics > 25) {
+
+    return res.status(400).json({
+      message: 'Too many topics requested'
+    });
+
   }
 
   try {
 
+    content.status = 'processing';
+
+    await content.save();
+
+    // Generate AI topics
     const topics = await generateControlledTopics(
       content.rawText,
       easy,
@@ -130,31 +171,82 @@ const generateTopics = async (req, res) => {
       hard
     );
 
-    const createdTopics = await Topic.insertMany(
-      topics.map((t, i) => ({
-        title: t.title,
-        difficulty: t.difficulty,
-        contentId: content._id,
-        createdBy: req.user._id,
-        order: i
-      }))
+    console.log("TOTAL GENERATED TOPICS:", topics.length);
+
+    console.log("RAW GENERATED TOPICS:", topics);
+
+    // Validate AI output
+    const validTopics = topics.filter(t =>
+
+      t.title &&
+      typeof t.title === 'string' &&
+      t.title.trim().length > 3 &&
+      ['easy', 'moderate', 'hard'].includes(t.difficulty)
+
     );
+
+    console.log("VALID TOPICS:", validTopics.length);
+
+    // Ensure AI respected requested count
+    if (validTopics.length !== totalTopics) {
+
+      console.warn(
+        `Expected ${totalTopics} topics but received ${validTopics.length}`
+      );
+
+    }
+
+    // Remove old topics before regenerating
+    await Topic.deleteMany({
+      contentId: content._id
+    });
+
+    // Save validated topics
+    const createdTopics = await Topic.insertMany(
+
+      validTopics.map((t, i) => ({
+
+        title: t.title.trim(),
+
+        difficulty: t.difficulty,
+
+        contentId: content._id,
+
+        createdBy: req.user._id,
+
+        order: i
+
+      })),
+
+      { ordered: false }
+
+    );
+
+    console.log("SAVED TOPICS:", createdTopics.length);
 
     content.status = 'processed';
 
     await content.save();
 
     res.json({
+      success: true,
+      requestedTopics: totalTopics,
+      generatedTopics: topics.length,
+      validTopics: validTopics.length,
+      savedTopics: createdTopics.length,
       topics: createdTopics
     });
 
   } catch (error) {
+
+    console.error("TOPIC GENERATION ERROR:", error);
 
     content.status = 'failed';
 
     await content.save();
 
     res.status(500).json({
+      success: false,
       message: 'Topic generation failed',
       error: error.message
     });

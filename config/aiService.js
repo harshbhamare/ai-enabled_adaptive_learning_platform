@@ -3,119 +3,244 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 /**
- * Extract micro-topics and summaries from raw text using Gemini
- * Enhanced prompts for sharper, more educational content
+ * Utility Delay Function
  */
-const extractTopicsAndSummaries = async (rawText) => {
-  console.log("USING MODEL:", 'models/gemini-2.5-flash-lite');
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Retry wrapper for Gemini API
+ */
+const generateWithRetry = async (model, prompt, retries = 3) => {
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+
+    try {
+
+      console.log(`Gemini Request Attempt: ${attempt}`);
+
+      const result = await model.generateContent(prompt);
+
+      return result;
+
+    } catch (error) {
+
+      console.error(`Attempt ${attempt} failed:`, error.message);
+
+      // Retry only for temporary overload issues
+      if (
+        error.message.includes('503') ||
+        error.message.includes('high demand')
+      ) {
+
+        if (attempt < retries) {
+
+          const waitTime = attempt * 2000;
+
+          console.log(`Retrying in ${waitTime}ms...`);
+
+          await delay(waitTime);
+
+          continue;
+        }
+      }
+
+      throw error;
+    }
+  }
+};
+
+/**
+ * Generate controlled micro-topics and summaries from raw text
+ */
+const generateControlledTopics = async (
+  rawText,
+  easyCount,
+  moderateCount,
+  hardCount
+) => {
+
+  console.log("USING MODEL:", 'gemini-2.5-flash-lite');
+
   const model = genAI.getGenerativeModel({
-    model: 'models/gemini-2.5-flash-lite',
+    model: 'gemini-2.5-flash-lite',
     generationConfig: {
-      temperature: 0.4,
+      temperature: 0.3,
       topK: 40,
       topP: 0.95,
     }
   });
 
-  const prompt = `You are an expert educational content curator and instructional designer. Analyze the following study material and extract clear, actionable micro-topics.
+const prompt = `You are an expert engineering curriculum designer and academic content architect.
 
-REQUIREMENTS:
-1. Extract 6-12 distinct, focused topics (not too broad, not too narrow)
-2. Each topic should represent a single, teachable concept
-3. Write summaries that are:
-   - Clear and concise (2-3 sentences)
-   - Action-oriented (what students will learn/understand)
-   - Free of jargon unless necessary
-   - Engaging and motivating
-4. Assign difficulty based on:
-   - "easy": Foundational concepts, definitions, basic understanding
-   - "normal": Application of concepts, moderate complexity
-   - "advanced": Complex analysis, synthesis, expert-level understanding
+Your task is to analyze the given engineering study material and generate highly structured educational topics for an AI-powered adaptive learning platform.
 
-Return ONLY a valid JSON array (no markdown, no code blocks):
+IMPORTANT OBJECTIVE:
+Generate clean, meaningful, non-overlapping learning topics that can later be used for:
+- adaptive learning
+- quiz generation
+- module building
+- microlearning content
+- student assessment
+
+STRICT REQUIREMENTS:
+
+1. Generate EXACTLY:
+- ${easyCount} easy topics
+- ${moderateCount} moderate topics
+- ${hardCount} hard topics
+
+2. Total generated topics MUST equal:
+${easyCount + moderateCount + hardCount}
+
+3. Every topic must:
+- represent ONE complete teachable concept
+- be academically meaningful
+- be concise and naturally written
+- independently make sense when read alone
+- NOT be truncated
+- NOT be vague
+- NOT be repetitive
+- NOT overlap heavily with another topic
+
+4. Topic title quality rules:
+- Prefer concise academic topic names
+- Prefer 4–10 words
+- Avoid filler phrases like:
+  - "Understanding the..."
+  - "Explaining the..."
+  - "Recognizing the..."
+  - "Describing the..."
+  - "Identifying the..."
+- Topic titles should sound like:
+  - real syllabus topics
+  - engineering curriculum headings
+  - professional educational modules
+
+5. Learning sequence rules:
+- Arrange topics logically
+- Begin from foundational concepts
+- Progress toward intermediate understanding
+- End with advanced or analytical concepts
+
+6. Difficulty classification rules:
+- easy:
+  foundational concepts, definitions, introductions, basic understanding
+
+- moderate:
+  applied concepts, implementation, practical understanding, comparative analysis
+
+- hard:
+  advanced concepts, optimization, analytical thinking, synthesis, complex problem-solving
+
+7. IMPORTANT:
+- Ensure clear separation between easy, moderate, and hard topics
+- Do NOT classify most topics as easy
+- Difficulty distribution must genuinely reflect conceptual complexity
+
+8. DO NOT:
+- generate summaries
+- generate explanations
+- generate descriptions
+- generate bullet points
+- generate learning outcomes
+- generate incomplete headings
+- generate duplicated concepts
+
+9. Return ONLY valid JSON array.
+Do NOT include:
+- markdown
+- comments
+- explanations
+- code blocks
+
+RESPONSE FORMAT:
+
 [
   {
-    "title": "Clear, specific topic title (5-8 words)",
-    "summary": "Engaging 2-3 sentence summary explaining what students will learn and why it matters.",
-    "difficulty": "easy|normal|advanced"
+    "title": "Topic Name",
+    "difficulty": "easy"
   }
 ]
 
 STUDY MATERIAL:
-${rawText.substring(0, 10000)}
-
-Focus on creating topics that build upon each other logically. Make summaries compelling and student-focused.`;
+${rawText.substring(0, 15000)}
+`;
 
   try {
-    const result = await model.generateContent(prompt);
+
+    const result = await generateWithRetry(model, prompt);
+
     const response = await result.response;
+
     const text = response.text();
 
-    // Clean up response
     let cleanText = text.trim();
-    cleanText = cleanText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
 
-    // Extract JSON array
+    cleanText = cleanText
+      .replace(/```json/g, '')
+      .replace(/```/g, '')
+      .trim();
+
     const jsonMatch = cleanText.match(/\[[\s\S]*\]/);
+
     if (!jsonMatch) {
-      console.error('Gemini response:', text);
+
+      console.error('RAW GEMINI RESPONSE:', text);
+
       throw new Error('AI did not return valid JSON array');
     }
 
     const topics = JSON.parse(jsonMatch[0]);
 
-    // Validate and enhance
     if (!Array.isArray(topics) || topics.length === 0) {
-      throw new Error('AI returned empty or invalid topics array');
+      throw new Error('Invalid topics array');
     }
 
-    // Ensure quality standards
     return topics.map((topic, index) => ({
+
       title: topic.title?.trim() || `Topic ${index + 1}`,
-      summary: topic.summary?.trim() || 'Summary not available',
-      difficulty: ['easy', 'normal', 'advanced'].includes(topic.difficulty)
+
+      difficulty: ['easy', 'moderate', 'hard'].includes(topic.difficulty)
         ? topic.difficulty
-        : 'normal'
+        : 'moderate'
+
     }));
 
   } catch (error) {
-    console.error('Gemini API Error:', error.message);
 
-    // Enhanced fallback
+    console.error('Topic Generation Error:', error.message);
+
     return generateFallbackTopics(rawText);
   }
 };
 
 /**
- * Analyze document structure to determine topic distribution
+ * Analyze document structure
  */
 const analyzeDocumentStructure = async (rawText) => {
+
+  console.log("USING MODEL:", 'gemini-2.5-flash-lite');
+
   const model = genAI.getGenerativeModel({
-    model: 'models/gemini-2.5-flash-lite',
+    model: 'gemini-2.5-flash-lite',
     generationConfig: {
       temperature: 0.3,
     }
   });
 
-  const prompt = `You are an expert academic analyst and a professional curriculum designer.
-Analyze the following study material and determine how it can be broken into highly effective learning topics.
+  const prompt = `You are an expert academic analyst and curriculum designer.
+
+Analyze the following study material.
 
 Your task:
-1. Identify all logically teachable concepts present in the document.
-Consider:
-- conceptual depth
-- subtopics
-- dependency between topics
-- engineering-level complexity
+1. Identify logically teachable concepts
 2. Classify them into:
-   - easy (basic concepts)
-   - moderate (applied understanding)
-   - hard (complex concepts)
-
-Do not estimate randomly.
-Analyze the document structure carefully before deciding topic counts.
+   - easy
+   - moderate
+   - hard
 
 Return ONLY valid JSON:
+
 {
   "totalTopics": number,
   "easy": number,
@@ -126,35 +251,34 @@ Return ONLY valid JSON:
 Rules:
 - Do NOT generate actual topics
 - Only analyze structure
-- Ensure counts are realistic and sum equals totalTopics
+- Ensure counts are realistic
 
 STUDY MATERIAL:
-${rawText.substring(0, 15000)}`;
+${rawText.substring(0, 15000)}
+`;
 
   try {
-    const result = await model.generateContent(prompt);
 
-    // Get raw AI response
+    const result = await generateWithRetry(model, prompt);
+
     const text = result.response.text().trim();
 
-    // Remove markdown wrappers if Gemini adds them
     const cleanText = text
       .replace(/```json/g, '')
       .replace(/```/g, '')
       .trim();
 
-    // Extract JSON object
     const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
 
     if (!jsonMatch) {
+
       console.error("RAW GEMINI RESPONSE:", text);
+
       throw new Error("Invalid JSON format returned by AI");
     }
 
-    // Parse JSON safely
     const parsedData = JSON.parse(jsonMatch[0]);
 
-    // Basic validation
     if (
       typeof parsedData.totalTopics !== 'number' ||
       typeof parsedData.easy !== 'number' ||
@@ -170,12 +294,11 @@ ${rawText.substring(0, 15000)}`;
 
     console.error("Analysis Error:", err.message);
 
-    // Dynamic fallback based on document size
+    // Dynamic fallback
     const wordCount = rawText.split(/\s+/).length;
 
     let totalTopics = Math.max(4, Math.ceil(wordCount / 600));
 
-    // Prevent extremely large values
     totalTopics = Math.min(totalTopics, 20);
 
     const easy = Math.ceil(totalTopics * 0.3);
@@ -191,7 +314,34 @@ ${rawText.substring(0, 15000)}`;
   }
 };
 
+/**
+ * Fallback Topic Generator
+ */
+const generateFallbackTopics = (rawText) => {
 
+  const paragraphs = rawText
+    .split('\n')
+    .filter(p => p.trim().length > 50);
+
+  return paragraphs.slice(0, 6).map((p, index) => ({
+
+    title: `Topic ${index + 1}`,
+
+    summary: p.substring(0, 180).trim(),
+
+    difficulty:
+      index < 2
+        ? 'easy'
+        : index < 4
+          ? 'normal'
+          : 'advanced'
+  }));
+};
+
+module.exports = {
+  generateControlledTopics,
+  analyzeDocumentStructure
+};
 
 
 
@@ -476,10 +626,6 @@ ${rawText.substring(0, 15000)}`;
 //   }
 // };
 
-module.exports = {
-  extractTopicsAndSummaries,
-  analyzeDocumentStructure,
-};
 
 
 
