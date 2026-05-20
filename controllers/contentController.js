@@ -348,11 +348,65 @@ const generateContentForTopic = async (req, res) => {
 
 };
 
+const getTopicContent = async (req, res) => {
+
+  try {
+
+    const topic = await Topic.findById(req.params.topicId);
+
+    if (!topic) {
+
+      return res.status(404).json({
+        message: 'Topic not found'
+      });
+
+    }
+
+    const topicContent = await TopicContent.findOne({
+      topicId: topic._id
+    });
+
+    if (!topicContent) {
+
+      return res.status(404).json({
+        message: 'Content not generated yet'
+      });
+
+    }
+
+    res.json({
+      success: true,
+      topic: {
+        id: topic._id,
+        title: topic.title,
+        difficulty: topic.difficulty
+      },
+      content: topicContent
+    });
+
+  } catch (error) {
+
+    console.error(
+      "GET TOPIC CONTENT ERROR:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch topic content',
+      error: error.message
+    });
+
+  }
+
+};
+
 module.exports = {
   uploadContent,
   analyzeContent,
   generateTopics,
   getMyContent,
   getContentTopics,
-  generateContentForTopic
+  generateContentForTopic,
+  getTopicContent
 };
