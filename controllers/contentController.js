@@ -1,12 +1,14 @@
 const Content = require('../models/Content');
 const Topic = require('../models/Topic');
 const {
+  generateControlledTopics,
   analyzeDocumentStructure,
-  generateControlledTopics
+  generateTopicContent
 } = require('../config/aiService');
 const pdfParse = require('pdf-parse');
 const fs = require('fs');
 const path = require('path');
+const TopicContent = require('../models/TopicContent');
 
 // Helper: Detect file type from extension
 const getFileType = (filename) => {
@@ -269,10 +271,88 @@ const getContentTopics = async (req, res) => {
   res.json(topics);
 };
 
+const generateContentForTopic = async (req, res) => {
+
+  const topic = await Topic.findById(req.params.topicId);
+
+  if (!topic) {
+
+    return res.status(404).json({
+      message: 'Topic not found'
+    });
+
+  }
+
+  const content = await Content.findById(topic.contentId);
+
+  if (!content) {
+
+    return res.status(404).json({
+      message: 'Parent content not found'
+    });
+
+  }
+
+  try {
+
+    console.log("GENERATING CONTENT FOR TOPIC:");
+    console.log(topic.title);
+
+    // Remove old generated content
+    await TopicContent.deleteMany({
+      topicId: topic._id
+    });
+
+    const generatedContent = await generateTopicContent(
+      topic.title,
+      topic.difficulty,
+      content.rawText
+    );
+
+    const savedContent = await TopicContent.create({
+
+      topicId: topic._id,
+
+      explanation: generatedContent.explanation,
+
+      keyPoints: generatedContent.keyPoints,
+
+      realWorldExample:
+        generatedContent.realWorldExample,
+
+      revisionSummary:
+        generatedContent.revisionSummary
+
+    });
+
+    res.json({
+      success: true,
+      topic: topic.title,
+      content: savedContent
+    });
+
+  } catch (error) {
+
+    console.error(
+      "CONTENT GENERATION ERROR:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: 'Content generation failed',
+      error: error.message
+    });
+
+  }
+
+};
+
 module.exports = {
   uploadContent,
   analyzeContent,
   generateTopics,
   getMyContent,
-  getContentTopics
+  getContentTopics,
+  generateContentForTopic
 };

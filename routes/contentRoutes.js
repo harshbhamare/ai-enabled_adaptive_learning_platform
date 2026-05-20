@@ -7,6 +7,7 @@ const {
   uploadContent,
   analyzeContent,
   generateTopics,
+  generateContentForTopic,
   getMyContent,
   getContentTopics
 } = require('../controllers/contentController');
@@ -34,5 +35,6 @@ router.get('/', getMyContent);
 router.get('/:id/topics', getContentTopics);
 router.post('/:id/analyze', analyzeContent);
 router.post('/:id/generate-topics', generateTopics);
+router.post('/topic/:topicId/generate-content', generateContentForTopic);
 
 module.exports = router;
