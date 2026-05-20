@@ -3,12 +3,14 @@ const Topic = require('../models/Topic');
 const {
   generateControlledTopics,
   analyzeDocumentStructure,
-  generateTopicContent
+  generateTopicContent,
+  analyzeQuizRequirement
 } = require('../config/aiService');
 const pdfParse = require('pdf-parse');
 const fs = require('fs');
 const path = require('path');
 const TopicContent = require('../models/TopicContent');
+const QuizPlan = require('../models/QuizPlan');
 
 // Helper: Detect file type from extension
 const getFileType = (filename) => {
@@ -401,6 +403,96 @@ const getTopicContent = async (req, res) => {
 
 };
 
+const generateQuizPlan = async (req, res) => {
+
+  try {
+
+    const topic = await Topic.findById(
+      req.params.topicId
+    );
+
+    if (!topic) {
+
+      return res.status(404).json({
+        message: 'Topic not found'
+      });
+
+    }
+
+    const topicContent = await TopicContent.findOne({
+      topicId: topic._id
+    });
+
+    if (!topicContent) {
+
+      return res.status(404).json({
+        message: 'Generate topic content first'
+      });
+
+    }
+
+    console.log(
+      "GENERATING QUIZ PLAN FOR:",
+      topic.title
+    );
+
+    // Remove old plan if exists
+    await QuizPlan.deleteMany({
+      topicId: topic._id
+    });
+
+    const analysis = await analyzeQuizRequirement(
+
+      topic.title,
+
+      topic.difficulty,
+
+      topicContent.explanation
+
+    );
+
+    const savedPlan = await QuizPlan.create({
+
+      topicId: topic._id,
+
+      recommendedQuestions:
+        analysis.recommendedQuestions,
+
+      assessmentLevel:
+        analysis.assessmentLevel,
+
+      reason:
+        analysis.reason
+
+    });
+
+    res.json({
+      success: true,
+      topic: {
+        id: topic._id,
+        title: topic.title,
+        difficulty: topic.difficulty
+      },
+      quizPlan: savedPlan
+    });
+
+  } catch (error) {
+
+    console.error(
+      "QUIZ PLAN GENERATION ERROR:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message: 'Quiz plan generation failed',
+      error: error.message
+    });
+
+  }
+
+};
+
 module.exports = {
   uploadContent,
   analyzeContent,
@@ -408,5 +500,6 @@ module.exports = {
   getMyContent,
   getContentTopics,
   generateContentForTopic,
-  getTopicContent
+  getTopicContent,
+  generateQuizPlan
 };

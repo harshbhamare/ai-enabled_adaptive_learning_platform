@@ -483,11 +483,146 @@ ${rawText.substring(0, 12000)}
 
 };
 
+const analyzeQuizRequirement = async (
+  topicTitle,
+  difficulty,
+  topicContent
+) => {
+
+  console.log("USING MODEL:", 'gemini-2.5-flash-lite');
+
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash-lite',
+    generationConfig: {
+      temperature: 0.3,
+      topK: 40,
+      topP: 0.95,
+    }
+  });
+
+  const prompt = `You are an expert engineering educator and assessment designer.
+
+Analyze the following educational topic and determine how much assessment coverage it requires.
+
+TOPIC:
+${topicTitle}
+
+DIFFICULTY:
+${difficulty}
+
+TOPIC CONTENT:
+${topicContent}
+
+TASK:
+
+Determine:
+1. How many quiz questions should ideally be generated for this topic
+2. Assessment importance level
+3. Short reasoning
+
+IMPORTANT RULES:
+
+- Very small/basic topics may need:
+  0 or 1 question
+
+- Moderate conceptual topics may need:
+  2 to 3 questions
+
+- Complex analytical topics may need:
+  4 to 5 questions
+
+- Do NOT recommend high question counts unnecessarily
+
+- Focus on:
+  - conceptual depth
+  - practical importance
+  - analytical complexity
+  - assessment necessity
+
+Return ONLY valid JSON:
+
+{
+  "recommendedQuestions": 3,
+  "assessmentLevel": "medium",
+  "reason": "This topic contains moderate conceptual understanding and practical application."
+}
+`;
+
+  try {
+
+    const result = await generateWithRetry(
+      model,
+      prompt
+    );
+
+    const response = await result.response;
+
+    const text = response.text();
+
+    let cleanText = text.trim();
+
+    cleanText = cleanText
+      .replace(/```json/g, '')
+      .replace(/```/g, '')
+      .trim();
+
+    const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
+
+    if (!jsonMatch) {
+
+      console.error("RAW AI RESPONSE:", text);
+
+      throw new Error('Invalid JSON');
+    }
+
+    const parsedData = JSON.parse(jsonMatch[0]);
+
+    return {
+
+      recommendedQuestions:
+        parsedData.recommendedQuestions || 1,
+
+      assessmentLevel:
+        ['low', 'medium', 'high']
+          .includes(parsedData.assessmentLevel)
+          ? parsedData.assessmentLevel
+          : 'medium',
+
+      reason:
+        parsedData.reason ||
+        'Assessment analysis unavailable.'
+
+    };
+
+  } catch (error) {
+
+    console.error(
+      "QUIZ REQUIREMENT ANALYSIS ERROR:",
+      error.message
+    );
+
+    return {
+
+      recommendedQuestions: 2,
+
+      assessmentLevel: 'medium',
+
+      reason:
+        'Fallback assessment recommendation.'
+
+    };
+
+  }
+
+};
+
 module.exports = {
   generateControlledTopics,
   analyzeDocumentStructure,
-  generateTopicContent
+  generateTopicContent,
+  analyzeQuizRequirement
 };
+
 
 
 
