@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 
 const quizQuestionSchema = new mongoose.Schema({
 
+  contentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Content',
+    required: true
+  },
+
   topicId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Topic',
@@ -37,7 +43,7 @@ const quizQuestionSchema = new mongoose.Schema({
     default: true
   },
 
-  verifiedByFaculty: {
+  approvedByFaculty: {
     type: Boolean,
     default: false
   }

@@ -10,6 +10,7 @@ const {
   generateContentForTopic,
   getTopicContent,
   generateQuizPlan,
+  generateChapterQuiz,
   getMyContent,
   getContentTopics
 } = require('../controllers/contentController');
@@ -40,5 +41,6 @@ router.post('/:id/generate-topics', generateTopics);
 router.post('/topic/:topicId/generate-content', generateContentForTopic);
 router.get('/topic/:topicId/content', getTopicContent);
 router.post('/topic/:topicId/generate-quiz-plan', generateQuizPlan);
+router.post('/:contentId/generate-chapter-quiz', generateChapterQuiz);
 
 module.exports = router;

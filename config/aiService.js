@@ -616,11 +616,126 @@ Return ONLY valid JSON:
 
 };
 
+const generateChapterQuizQuestions = async (
+  topicsData
+) => {
+
+  console.log("USING MODEL:", 'gemini-2.5-flash-lite');
+
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash-lite',
+    generationConfig: {
+      temperature: 0.4,
+      topK: 40,
+      topP: 0.95,
+    }
+  });
+
+  const prompt = `You are an expert engineering educator and assessment designer.
+
+Generate a balanced chapter-level quiz using the provided topics.
+
+IMPORTANT OBJECTIVE:
+Generate a unified quiz for the entire chapter.
+
+RULES:
+
+1. Generate questions according to each topic's recommended question count.
+
+2. Focus more on:
+- conceptually important topics
+- analytical topics
+- practically relevant concepts
+
+3. Avoid:
+- repetitive questions
+- vague wording
+- overly theoretical questions
+- duplicate concepts
+
+4. Question styles:
+- easy → conceptual/basic
+- moderate → application-based
+- hard → analytical/scenario-based
+
+5. Each question must include:
+- question
+- 4 options
+- correctAnswer
+- short explanation
+
+6. Return ONLY valid JSON array.
+
+FORMAT:
+
+[
+  {
+    "topicTitle": "Topic Name",
+    "question": "Question text",
+    "options": [
+      "Option A",
+      "Option B",
+      "Option C",
+      "Option D"
+    ],
+    "correctAnswer": "Correct Option",
+    "explanation": "Short explanation",
+    "difficulty": "easy"
+  }
+]
+
+TOPICS DATA:
+${JSON.stringify(topicsData)}
+`;
+
+  try {
+
+    const result = await generateWithRetry(
+      model,
+      prompt
+    );
+
+    const response = await result.response;
+
+    const text = response.text();
+
+    let cleanText = text.trim();
+
+    cleanText = cleanText
+      .replace(/```json/g, '')
+      .replace(/```/g, '')
+      .trim();
+
+    const jsonMatch = cleanText.match(/\[[\s\S]*\]/);
+
+    if (!jsonMatch) {
+
+      console.error("RAW QUIZ RESPONSE:", text);
+
+      throw new Error('Invalid JSON');
+    }
+
+    return JSON.parse(jsonMatch[0]);
+
+  } catch (error) {
+
+    console.error(
+      "CHAPTER QUIZ GENERATION ERROR:",
+      error.message
+    );
+
+    return [];
+
+  }
+
+};
+
 module.exports = {
   generateControlledTopics,
   analyzeDocumentStructure,
   generateTopicContent,
-  analyzeQuizRequirement
+  analyzeQuizRequirement,
+  generateChapterQuizQuestions
 };
 
 

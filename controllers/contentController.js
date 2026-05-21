@@ -4,15 +4,17 @@ const {
   generateControlledTopics,
   analyzeDocumentStructure,
   generateTopicContent,
-  analyzeQuizRequirement
+  analyzeQuizRequirement,
+  generateChapterQuizQuestions
 } = require('../config/aiService');
 const pdfParse = require('pdf-parse');
 const fs = require('fs');
 const path = require('path');
 const TopicContent = require('../models/TopicContent');
 const QuizPlan = require('../models/QuizPlan');
+const QuizQuestion = require('../models/QuizQuestion');
 
-// Helper: Detect file type from extension
+
 const getFileType = (filename) => {
   const ext = path.extname(filename).toLowerCase();
   if (['.mp4', '.avi', '.mov', '.mkv'].includes(ext)) return 'video';
@@ -22,8 +24,6 @@ const getFileType = (filename) => {
   return 'text';
 };
 
-// @desc Upload content
-// @route POST /api/content/upload
 const uploadContent = async (req, res) => {
   const { title, textContent } = req.body;
   let rawText = '';
@@ -259,15 +259,11 @@ const generateTopics = async (req, res) => {
 
 };
 
-// @desc Get all content by faculty
-// @route GET /api/content
 const getMyContent = async (req, res) => {
   const content = await Content.find({ uploadedBy: req.user._id }).sort({ createdAt: -1 });
   res.json(content);
 };
 
-// @desc Get topics for a content
-// @route GET /api/content/:id/topics
 const getContentTopics = async (req, res) => {
   const topics = await Topic.find({ contentId: req.params.id }).sort({ order: 1 });
   res.json(topics);
@@ -493,6 +489,177 @@ const generateQuizPlan = async (req, res) => {
 
 };
 
+const generateChapterQuiz = async (req, res) => {
+
+  try {
+
+    const content = await Content.findById(
+      req.params.contentId
+    );
+
+    if (!content) {
+
+      return res.status(404).json({
+        message: 'Content not found'
+      });
+
+    }
+
+    const topics = await Topic.find({
+      contentId: content._id
+    }).sort({ order: 1 });
+
+    if (!topics.length) {
+
+      return res.status(404).json({
+        message: 'No topics found'
+      });
+
+    }
+
+    const topicsData = [];
+
+    for (const topic of topics) {
+
+      const topicContent =
+        await TopicContent.findOne({
+          topicId: topic._id
+        });
+
+      const quizPlan =
+        await QuizPlan.findOne({
+          topicId: topic._id
+        });
+
+      if (
+        topicContent &&
+        quizPlan &&
+        quizPlan.recommendedQuestions > 0
+      ) {
+
+        topicsData.push({
+
+          topicId: topic._id,
+
+          topicTitle: topic.title,
+
+          difficulty: topic.difficulty,
+
+          explanation:
+            topicContent.explanation,
+
+          keyPoints:
+            topicContent.keyPoints,
+
+          recommendedQuestions:
+            quizPlan.recommendedQuestions,
+
+          assessmentLevel:
+            quizPlan.assessmentLevel
+
+        });
+
+      }
+
+    }
+
+    if (!topicsData.length) {
+
+      return res.status(400).json({
+        message:
+          'No valid quiz planning data found'
+      });
+
+    }
+
+    console.log(
+      "GENERATING CHAPTER QUIZ"
+    );
+
+    console.log(
+      "TOPICS INCLUDED:",
+      topicsData.length
+    );
+
+    // Remove previous quiz
+    await QuizQuestion.deleteMany({
+      contentId: content._id
+    });
+
+    const generatedQuiz =
+      await generateChapterQuizQuestions(
+        topicsData
+      );
+
+    console.log(
+      "GENERATED QUESTIONS:",
+      generatedQuiz.length
+    );
+
+    const topicMap = {};
+
+    topics.forEach(topic => {
+      topicMap[topic.title] = topic._id;
+    });
+
+    const savedQuestions =
+      await QuizQuestion.insertMany(
+
+        generatedQuiz.map(q => ({
+
+          contentId: content._id,
+
+          topicId:
+            topicMap[q.topicTitle],
+
+          question: q.question,
+
+          options: q.options,
+
+          correctAnswer:
+            q.correctAnswer,
+
+          explanation:
+            q.explanation,
+
+          difficulty:
+            ['easy', 'moderate', 'hard']
+              .includes(q.difficulty)
+              ? q.difficulty
+              : 'moderate'
+
+        })),
+
+        { ordered: false }
+
+      );
+
+    res.json({
+      success: true,
+      totalQuestions:
+        savedQuestions.length,
+      questions:
+        savedQuestions
+    });
+
+  } catch (error) {
+
+    console.error(
+      "CHAPTER QUIZ ERROR:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      message:
+        'Chapter quiz generation failed',
+      error: error.message
+    });
+
+  }
+
+};
+
 module.exports = {
   uploadContent,
   analyzeContent,
@@ -501,5 +668,6 @@ module.exports = {
   getContentTopics,
   generateContentForTopic,
   getTopicContent,
-  generateQuizPlan
+  generateQuizPlan,
+  generateChapterQuiz
 };
