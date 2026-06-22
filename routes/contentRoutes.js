@@ -12,7 +12,8 @@ const {
   generateQuizPlan,
   generateChapterQuiz,
   getMyContent,
-  getContentTopics
+  getContentTopics,
+  generateCompleteModule
 } = require('../controllers/contentController');
 
 const storage = multer.diskStorage({
@@ -42,5 +43,6 @@ router.post('/topic/:topicId/generate-content', generateContentForTopic);
 router.get('/topic/:topicId/content', getTopicContent);
 router.post('/topic/:topicId/generate-quiz-plan', generateQuizPlan);
 router.post('/:contentId/generate-chapter-quiz', generateChapterQuiz);
+router.post('/:contentId/generate-complete-module', generateCompleteModule);
 
 module.exports = router;

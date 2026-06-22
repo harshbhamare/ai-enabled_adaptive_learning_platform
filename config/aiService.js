@@ -3,12 +3,10 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Utility Delay Function
-
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 
 // Retry wrapper for Gemini API
-
 const generateWithRetry = async (model, prompt, retries = 3) => {
 
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -49,7 +47,6 @@ const generateWithRetry = async (model, prompt, retries = 3) => {
 };
 
 // Generate controlled micro-topics and summaries from raw text
-
 const generateControlledTopics = async (
   rawText,
   easyCount,
@@ -212,9 +209,7 @@ ${rawText.substring(0, 15000)}
   }
 };
 
-
 // Analyze document structure
-
 const analyzeDocumentStructure = async (rawText) => {
 
   console.log("USING MODEL:", 'gemini-2.5-flash-lite');
@@ -312,9 +307,7 @@ ${rawText.substring(0, 15000)}
   }
 };
 
-
 // Fallback Topic Generator
-
 const generateFallbackTopics = (rawText) => {
 
   const paragraphs = rawText
@@ -483,6 +476,111 @@ ${rawText.substring(0, 12000)}
 
 };
 
+// test1
+const generateAllTopicContents = async (
+  topics,
+  rawText
+) => {
+
+  console.log("USING MODEL:", "gemini-2.5-flash-lite");
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash-lite",
+    generationConfig: {
+      temperature: 0.5,
+      topK: 40,
+      topP: 0.95,
+    }
+  });
+
+  const prompt = `
+You are an expert engineering educator.
+
+Generate educational content for ALL topics.
+
+Return ONLY valid JSON array.
+
+FORMAT:
+
+[
+  {
+    "title":"Topic Name",
+    "explanation":"...",
+    "keyPoints":[
+      "...",
+      "..."
+    ],
+    "realWorldExample":"...",
+    "revisionSummary":"..."
+  }
+]
+
+TOPICS:
+
+${JSON.stringify(
+  topics.map(t => ({
+    title: t.title,
+    difficulty: t.difficulty
+  }))
+)}
+
+REFERENCE MATERIAL:
+
+${rawText.substring(0, 12000)}
+`;
+
+  try {
+
+    const result =
+      await generateWithRetry(
+        model,
+        prompt
+      );
+
+    const response =
+      await result.response;
+
+    const text =
+      response.text();
+
+    let cleanText =
+      text.trim();
+
+    cleanText = cleanText
+      .replace(/```json/g, '')
+      .replace(/```/g, '')
+      .trim();
+
+    const jsonMatch =
+      cleanText.match(/\[[\s\S]*\]/);
+
+    if (!jsonMatch) {
+
+      console.log(text);
+
+      throw new Error(
+        "Invalid JSON"
+      );
+
+    }
+
+    return JSON.parse(
+      jsonMatch[0]
+    );
+
+  } catch (error) {
+
+    console.error(
+      "BATCH CONTENT ERROR:",
+      error.message
+    );
+
+    return [];
+
+  }
+
+};
+
 const analyzeQuizRequirement = async (
   topicTitle,
   difficulty,
@@ -616,6 +714,116 @@ Return ONLY valid JSON:
 
 };
 
+// test2
+const generateAllQuizPlans = async (
+  topicsData
+) => {
+
+  console.log("USING MODEL:", "gemini-2.5-flash-lite");
+
+  const model =
+    genAI.getGenerativeModel({
+
+      model: "gemini-2.5-flash-lite",
+
+      generationConfig: {
+        temperature: 0.3,
+        topK: 40,
+        topP: 0.95,
+      }
+
+    });
+
+  const prompt = `
+You are an expert engineering educator and assessment designer.
+
+For EACH topic determine:
+
+1. recommendedQuestions
+2. assessmentLevel
+3. reason
+
+RULES:
+
+- very basic topics:
+  0-1 questions
+
+- moderate topics:
+  2-3 questions
+
+- advanced topics:
+  4-5 questions
+
+Return ONLY valid JSON array.
+
+FORMAT:
+
+[
+  {
+    "title":"Topic Name",
+    "recommendedQuestions":2,
+    "assessmentLevel":"medium",
+    "reason":"..."
+  }
+]
+
+TOPICS:
+
+${JSON.stringify(topicsData)}
+`;
+
+  try {
+
+    const result =
+      await generateWithRetry(
+        model,
+        prompt
+      );
+
+    const response =
+      await result.response;
+
+    const text =
+      response.text();
+
+    let cleanText =
+      text.trim();
+
+    cleanText = cleanText
+      .replace(/```json/g, '')
+      .replace(/```/g, '')
+      .trim();
+
+    const jsonMatch =
+      cleanText.match(/\[[\s\S]*\]/);
+
+    if (!jsonMatch) {
+
+      console.log(text);
+
+      throw new Error(
+        "Invalid JSON"
+      );
+
+    }
+
+    return JSON.parse(
+      jsonMatch[0]
+    );
+
+  } catch (error) {
+
+    console.error(
+      "BATCH QUIZ PLAN ERROR:",
+      error.message
+    );
+
+    return [];
+
+  }
+
+};
+
 const generateChapterQuizQuestions = async (
   topicsData
 ) => {
@@ -734,8 +942,10 @@ module.exports = {
   generateControlledTopics,
   analyzeDocumentStructure,
   generateTopicContent,
+  generateAllTopicContents,
   analyzeQuizRequirement,
-  generateChapterQuizQuestions
+  generateAllQuizPlans,
+  generateChapterQuizQuestions,  
 };
 
 

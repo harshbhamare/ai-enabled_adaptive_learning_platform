@@ -4,8 +4,10 @@ const {
   generateControlledTopics,
   analyzeDocumentStructure,
   generateTopicContent,
+  generateAllTopicContents,
   analyzeQuizRequirement,
-  generateChapterQuizQuestions
+  generateChapterQuizQuestions,
+  generateAllQuizPlans
 } = require('../config/aiService');
 const pdfParse = require('pdf-parse');
 const fs = require('fs');
@@ -301,27 +303,11 @@ const generateContentForTopic = async (req, res) => {
       topicId: topic._id
     });
 
-    const generatedContent = await generateTopicContent(
-      topic.title,
-      topic.difficulty,
-      content.rawText
-    );
-
-    const savedContent = await TopicContent.create({
-
-      topicId: topic._id,
-
-      explanation: generatedContent.explanation,
-
-      keyPoints: generatedContent.keyPoints,
-
-      realWorldExample:
-        generatedContent.realWorldExample,
-
-      revisionSummary:
-        generatedContent.revisionSummary
-
-    });
+    const savedContent =
+      await generateTopicContentInternal(
+        topic,
+        content.rawText
+      );
 
     res.json({
       success: true,
@@ -343,6 +329,46 @@ const generateContentForTopic = async (req, res) => {
     });
 
   }
+
+};
+
+const generateTopicContentInternal = async (
+  topic,
+  rawText
+) => {
+
+  // Remove old generated content
+  await TopicContent.deleteMany({
+    topicId: topic._id
+  });
+
+  const generatedContent =
+    await generateTopicContent(
+      topic.title,
+      topic.difficulty,
+      rawText
+    );
+
+  const savedContent =
+    await TopicContent.create({
+
+      topicId: topic._id,
+
+      explanation:
+        generatedContent.explanation,
+
+      keyPoints:
+        generatedContent.keyPoints,
+
+      realWorldExample:
+        generatedContent.realWorldExample,
+
+      revisionSummary:
+        generatedContent.revisionSummary
+
+    });
+
+  return savedContent;
 
 };
 
@@ -437,30 +463,10 @@ const generateQuizPlan = async (req, res) => {
       topicId: topic._id
     });
 
-    const analysis = await analyzeQuizRequirement(
-
-      topic.title,
-
-      topic.difficulty,
-
-      topicContent.explanation
-
-    );
-
-    const savedPlan = await QuizPlan.create({
-
-      topicId: topic._id,
-
-      recommendedQuestions:
-        analysis.recommendedQuestions,
-
-      assessmentLevel:
-        analysis.assessmentLevel,
-
-      reason:
-        analysis.reason
-
-    });
+    const savedPlan =
+      await generateQuizPlanInternal(
+        topic
+      );
 
     res.json({
       success: true,
@@ -486,6 +492,58 @@ const generateQuizPlan = async (req, res) => {
     });
 
   }
+
+};
+
+const generateQuizPlanInternal = async (
+  topic
+) => {
+
+  const topicContent =
+    await TopicContent.findOne({
+      topicId: topic._id
+    });
+
+  if (!topicContent) {
+
+    throw new Error(
+      `No content found for topic: ${topic.title}`
+    );
+
+  }
+
+  await QuizPlan.deleteMany({
+    topicId: topic._id
+  });
+
+  const analysis =
+    await analyzeQuizRequirement(
+
+      topic.title,
+
+      topic.difficulty,
+
+      topicContent.explanation
+
+    );
+
+  const savedPlan =
+    await QuizPlan.create({
+
+      topicId: topic._id,
+
+      recommendedQuestions:
+        analysis.recommendedQuestions,
+
+      assessmentLevel:
+        analysis.assessmentLevel,
+
+      reason:
+        analysis.reason
+
+    });
+
+  return savedPlan;
 
 };
 
@@ -660,6 +718,380 @@ const generateChapterQuiz = async (req, res) => {
 
 };
 
+const generateCompleteModule = async (req, res) => {
+  try {
+
+    const content =
+      await Content.findById(
+        req.params.contentId
+      );
+
+    if (!content) {
+
+      return res.status(404).json({
+        message: 'Content not found'
+      });
+
+    }
+
+    // STEP 0 — Generate topics if not present
+
+    let topics = await Topic.find({
+      contentId: content._id
+    }).sort({ order: 1 });
+
+    if (!topics.length) {
+
+      console.log(
+        "NO TOPICS FOUND — GENERATING TOPICS"
+      );
+
+      // Default generation counts
+      // Analyze document structure first
+
+      const analysis =
+        await analyzeDocumentStructure(
+          content.rawText
+        );
+
+      console.log(
+        "DOCUMENT ANALYSIS:",
+        analysis
+      );
+
+      const easy =
+        analysis.easy || 2;
+
+      const moderate =
+        analysis.moderate || 3;
+
+      const hard =
+        analysis.hard || 1;
+
+      const generatedTopics =
+        await generateControlledTopics(
+
+          content.rawText,
+
+          easy,
+
+          moderate,
+
+          hard
+
+        );
+
+      topics = await Topic.insertMany(
+
+        generatedTopics.map((t, i) => ({
+
+          title: t.title,
+
+          difficulty: t.difficulty,
+
+          contentId: content._id,
+
+          createdBy: req.user._id,
+
+          order: i
+
+        })),
+
+        { ordered: false }
+
+      );
+
+    }
+
+    console.log(
+      "STARTING COMPLETE MODULE GENERATION"
+    );
+
+
+    const generatedContents =
+      await generateAllTopicContents(
+        topics,
+        content.rawText
+      );
+
+    console.log(
+      "TOTAL GENERATED CONTENTS:",
+      generatedContents.length
+    );
+
+    const topicMap = {};
+    
+    topics.forEach(topic => {
+      topicMap[topic.title] = topic._id;
+    });
+
+    // Remove old generated content
+    await TopicContent.deleteMany({
+      topicId: {
+        $in: topics.map(t => t._id)
+      }
+    });
+
+    // Save all generated contents
+    await TopicContent.insertMany(
+
+      generatedContents
+        .filter(content => topicMap[content.title])
+        .map(content => ({
+
+          topicId:
+            topicMap[content.title],
+
+          explanation:
+            content.explanation,
+
+          keyPoints:
+            content.keyPoints,
+
+          realWorldExample:
+            content.realWorldExample,
+
+          revisionSummary:
+            content.revisionSummary
+
+        })),
+
+      { ordered: false }
+
+    );
+
+    console.log(
+      "BATCH CONTENT SAVED"
+    );
+
+    // ======================================================
+// BATCH QUIZ PLAN GENERATION
+// ======================================================
+
+const topicContents =
+  await TopicContent.find({
+
+    topicId: {
+      $in: topics.map(
+        t => t._id
+      )
+    }
+
+  });
+
+const quizInputData =
+  topics.map(topic => {
+
+    const content =
+      topicContents.find(
+
+        tc =>
+          tc.topicId.toString() ===
+          topic._id.toString()
+
+      );
+
+    return {
+
+      title:
+        topic.title,
+
+      difficulty:
+        topic.difficulty,
+
+      explanation:
+        content?.explanation || ''
+
+    };
+
+  });
+
+const generatedPlans =
+  await generateAllQuizPlans(
+    quizInputData
+  );
+
+console.log(
+  "TOTAL QUIZ PLANS:",
+  generatedPlans.length
+);
+
+// Remove old plans
+
+await QuizPlan.deleteMany({
+
+  topicId: {
+    $in: topics.map(
+      t => t._id
+    )
+  }
+
+});
+
+// Save new plans
+
+await QuizPlan.insertMany(
+
+  generatedPlans
+    .filter(
+      plan =>
+        topicMap[plan.title]
+    )
+    .map(plan => ({
+
+      topicId:
+        topicMap[plan.title],
+
+      recommendedQuestions:
+        plan.recommendedQuestions,
+
+      assessmentLevel:
+        plan.assessmentLevel,
+
+      reason:
+        plan.reason,
+
+      approvedByFaculty:
+        false
+
+    })),
+
+  { ordered: false }
+
+);
+
+console.log(
+  "QUIZ PLANS SAVED"
+);
+
+// ======================================================
+// END BATCH QUIZ PLAN GENERATION
+// ======================================================
+
+    // STEP 3 — Generate final chapter quiz
+
+    const topicsData = [];
+
+    for (const topic of topics) {
+
+      const topicContent =
+        await TopicContent.findOne({
+          topicId: topic._id
+        });
+
+      const quizPlan =
+        await QuizPlan.findOne({
+          topicId: topic._id
+        });
+
+      if (
+        topicContent &&
+        quizPlan &&
+        quizPlan.recommendedQuestions > 0
+      ) {
+
+        topicsData.push({
+
+          topicId: topic._id,
+
+          topicTitle: topic.title,
+
+          difficulty: topic.difficulty,
+
+          explanation:
+            topicContent.explanation,
+
+          keyPoints:
+            topicContent.keyPoints,
+
+          recommendedQuestions:
+            quizPlan.recommendedQuestions,
+
+          assessmentLevel:
+            quizPlan.assessmentLevel
+
+        });
+
+      }
+
+    }
+
+    await QuizQuestion.deleteMany({
+      contentId: content._id
+    });
+
+    const generatedQuiz =
+      await generateChapterQuizQuestions(
+        topicsData
+      );
+
+    const savedQuestions =
+      await QuizQuestion.insertMany(
+
+        generatedQuiz.map(q => ({
+
+          contentId: content._id,
+
+          topicId:
+            topicMap[q.topicTitle],
+
+          question: q.question,
+
+          options: q.options,
+
+          correctAnswer:
+            q.correctAnswer,
+
+          explanation:
+            q.explanation,
+
+          difficulty:
+            q.difficulty
+
+        })),
+
+        { ordered: false }
+
+      );
+
+    res.json({
+
+      success: true,
+
+      totalTopics:
+        topics.length,
+
+      totalQuestions:
+        savedQuestions.length,
+
+      message:
+        'Complete module generated successfully'
+
+    });
+
+  } catch (error) {
+
+    console.error(
+      "COMPLETE MODULE ERROR:",
+      error
+    );
+
+    res.status(500).json({
+
+      success: false,
+
+      message:
+        'Complete module generation failed',
+
+      error: error.message
+
+    });
+
+  }
+
+};
+
+
 module.exports = {
   uploadContent,
   analyzeContent,
@@ -669,5 +1101,6 @@ module.exports = {
   generateContentForTopic,
   getTopicContent,
   generateQuizPlan,
-  generateChapterQuiz
+  generateChapterQuiz,
+  generateCompleteModule
 };
